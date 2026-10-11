@@ -15,7 +15,7 @@
 #define MINER_1_IP "192.168.5.157"  // Gekko GT 801
 
 #define MINERS_POLL_INTERVAL_MS 3000
-#define MINERS_STALE_MS 15000
+#define MINERS_STALE_MS 45000   // only call a miner offline after 45 s of no answers
 
 // Start the background task that polls both miners.
 void miners_start(void);

@@ -17,6 +17,7 @@
 #include "esp_timer.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include "cJSON.h"
 
 #include "miners.h"
@@ -33,6 +34,9 @@ static const char *TAG = "MINERS";
 typedef struct {
     const char *ip;
     bool ok;                 // last poll succeeded
+    unsigned long polls;
+    unsigned long fails;
+    char last_err[40];
     int64_t last_ok_us;      // time of last successful poll
     char hostname[33];
     double hashrate_ghs;
@@ -143,7 +147,7 @@ static bool poll_miner(miner_state_t *m)
     esp_http_client_config_t config = {
         .url = url,
         .event_handler = http_event_handler,
-        .timeout_ms = 2500,
+        .timeout_ms = 6000,
     };
 
     s_http_len = 0;
@@ -159,12 +163,18 @@ static bool poll_miner(miner_state_t *m)
 
     if (err != ESP_OK || status != 200 || s_http_len == 0) {
         ESP_LOGW(TAG, "%s: no answer (%s, HTTP %d)", m->ip, esp_err_to_name(err), status);
+        if (err != ESP_OK) {
+            snprintf(m->last_err, sizeof(m->last_err), "%s", esp_err_to_name(err));
+        } else {
+            snprintf(m->last_err, sizeof(m->last_err), "HTTP %d, %d bytes", status, s_http_len);
+        }
         return false;
     }
 
     cJSON *root = cJSON_Parse(s_http_buf);
     if (!root) {
         ESP_LOGW(TAG, "%s: bad JSON", m->ip);
+        snprintf(m->last_err, sizeof(m->last_err), "bad JSON (%d bytes)", s_http_len);
         return false;
     }
 
@@ -250,14 +260,23 @@ static void push_combined_to_ui(void)
     format_diff(best, bd, sizeof(bd));
 
     // Per-miner breakdown for the Hardware popup
-    static char details[640];
+    static char details[768];
     int pos = 0;
     for (int i = 0; i < MINER_COUNT && pos < (int)sizeof(details) - 1; i++) {
         const miner_state_t *m = &s_miners[i];
         const char *name = m->hostname[0] ? m->hostname : m->ip;
+        int age_s = m->last_ok_us ? (int)((esp_timer_get_time() - m->last_ok_us) / 1000000) : -1;
         if (!m->ok) {
-            pos += snprintf(details + pos, sizeof(details) - pos, "%s: OFFLINE\n\n", name);
+            pos += snprintf(details + pos, sizeof(details) - pos, "%s (%s): OFFLINE - %s\n\n", name, m->ip,
+                            m->last_err[0] ? m->last_err : "never answered");
             continue;
+        }
+        if (m->fails > 0) {
+            pos += snprintf(details + pos, sizeof(details) - pos, "(missed %lu of %lu reads, last: %s)\n",
+                            m->fails, m->polls, m->last_err);
+        }
+        if (age_s > 10) {
+            pos += snprintf(details + pos, sizeof(details) - pos, "(slow: last answer %d s ago)\n", age_s);
         }
         pos += snprintf(details + pos, sizeof(details) - pos,
                         "%s  (%s)\n%.2f TH/s   %.1f W   %.0f/%.0f C   VR %.0f C   err %.2f%%\n",
@@ -270,6 +289,25 @@ static void push_combined_to_ui(void)
         if (pos < (int)sizeof(details) - 1) {
             pos += snprintf(details + pos, sizeof(details) - pos, "\n");
         }
+    }
+
+    if (pos < (int)sizeof(details) - 1) {
+        const char *why = "unknown";
+        switch (esp_reset_reason()) {
+            case ESP_RST_POWERON:  why = "power on"; break;
+            case ESP_RST_SW:       why = "software restart"; break;
+            case ESP_RST_PANIC:    why = "CRASH (panic)"; break;
+            case ESP_RST_INT_WDT:  why = "CRASH (interrupt watchdog)"; break;
+            case ESP_RST_TASK_WDT: why = "CRASH (task watchdog)"; break;
+            case ESP_RST_WDT:      why = "CRASH (watchdog)"; break;
+            case ESP_RST_BROWNOUT: why = "POWER DIP (brownout)"; break;
+            case ESP_RST_DEEPSLEEP: why = "wake from sleep"; break;
+            default: break;
+        }
+        pos += snprintf(details + pos, sizeof(details) - pos,
+                        "Screen: up %lu min, last restart: %s, free RAM %u KB",
+                        (unsigned long)(esp_timer_get_time() / 60000000LL), why,
+                        (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
     }
 
     char chip_text[32];
@@ -298,7 +336,7 @@ static void push_combined_to_ui(void)
     home_update_best_difficulty(bd);
     // These close an open popup when called, so only send them when they change
     static char last_model[48] = "", last_chip[32] = "", last_pool[256] = "";
-    const char *model = live == MINER_COUNT ? "Dual GT 801 (Miner-Mods)" : "Dual GT 801 - ONE OFFLINE";
+    const char *model = "Dual GT 801 (Miner-Mods)";
     if (strcmp(model, last_model) != 0) {
         strncpy(last_model, model, sizeof(last_model) - 1);
         home_update_device_model(model);
@@ -333,11 +371,15 @@ static void miners_task(void *arg)
         int64_t now = esp_timer_get_time();
         for (int i = 0; i < MINER_COUNT; i++) {
             miner_state_t *m = &s_miners[i];
+            m->polls++;
             if (poll_miner(m)) {
                 m->ok = true;
                 m->last_ok_us = now;
                 s_last_any_ok_us = now;
-            } else if (now - m->last_ok_us > (int64_t)MINERS_STALE_MS * 1000) {
+            } else {
+                m->fails++;
+            }
+            if (m->ok && now - m->last_ok_us > (int64_t)MINERS_STALE_MS * 1000) {
                 m->ok = false;   // keep last values briefly, then drop the miner
             }
         }
@@ -361,7 +403,7 @@ void miners_start(void)
         ESP_LOGE(TAG, "Out of memory, dual-miner mode disabled");
         return;
     }
-    xTaskCreate(miners_task, "miners", 8192, NULL, 5, &s_task);
+    xTaskCreate(miners_task, "miners", 12288, NULL, 5, &s_task);
     ESP_LOGI(TAG, "Dual-miner polling started (%s, %s)", MINER_0_IP, MINER_1_IP);
 }
 

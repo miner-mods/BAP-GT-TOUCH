@@ -26,7 +26,7 @@ static lv_obj_t *efficiency_label = NULL;
 static lv_obj_t *fan_label = NULL;
 static lv_obj_t *shares_label = NULL;
 static lv_obj_t *bd_label = NULL;
-static char current_miner_details[640] = "";
+static char current_miner_details[768] = "";
 extern const lv_img_dsc_t mm_background;
 
 static float current_power_watts = 0.0f;
@@ -174,7 +174,8 @@ static void hardware_popup_close_clicked(lv_event_t *e)
 {
     if (hardware_popup)
     {
-        lv_obj_del(hardware_popup);
+        // Delete after the tap finishes processing, not in the middle of it
+        lv_obj_del_async(hardware_popup);
         hardware_popup = NULL;
     }
 }
