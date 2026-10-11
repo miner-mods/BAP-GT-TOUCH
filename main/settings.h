@@ -17,7 +17,6 @@ typedef struct {
 } settings_info_t;
 
 void settings_screen_create(void);
-void settings_initialize(void);
 void settings_screen_destroy(void);
 lv_obj_t* settings_get_screen(void);
 void settings_update_info(const settings_info_t* info);

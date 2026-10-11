@@ -24,7 +24,7 @@ typedef struct {
 // Colors (Bitaxe site theme)
 #define COLOR_BACKGROUND    lv_color_hex(0x050506)
 #define COLOR_CARD_BG       lv_color_hex(0x0F1218)
-#define COLOR_ACCENT        lv_color_hex(0xD4021B)
+#define COLOR_ACCENT        lv_color_hex(0x84DC00)  // Miner-Mods lime
 #define COLOR_RED           lv_color_hex(0xD4021B)
 #define COLOR_TEXT_PRIMARY  lv_color_hex(0xFFFFFF)
 #define COLOR_TEXT_SECONDARY lv_color_hex(0xA3A3A3)
@@ -48,6 +48,7 @@ void home_update_asic_model(const char* chip);
 void home_update_fan_speed(const char* fan_rpm);
 void home_update_shares(const char* shares);
 void home_update_best_difficulty(const char* bd);
+void home_update_miner_details(const char* details);
 
 // Pool data functions
 void home_update_pool_info(const pool_info_t* pool_info);

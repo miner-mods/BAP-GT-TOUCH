@@ -15,6 +15,7 @@
 #include "wifi.h"
 #include "block.h"
 #include "lvgl_port.h"
+#include "miners.h"
 
 static const char *TAG = "BAP_PARSER";
 
@@ -65,7 +66,20 @@ esp_err_t bap_handle_response(const bap_message_t *msg) {
     }
     
     esp_err_t ret = ESP_OK;
-    
+
+    // Miner-Mods: while both miners are being read over WiFi, ignore mining
+    // stats from the single miner on the BAP cable (WiFi creds etc still pass).
+    if (miners_wifi_active()) {
+        static const char *wifi_owned[] = {
+            "hashrate", "chipTemp", "power", "shares", "deviceModel", "asicModel",
+            "pool", "poolPort", "poolUser", "fan_speed", "best_difficulty", "block_height"};
+        for (size_t i = 0; i < sizeof(wifi_owned) / sizeof(wifi_owned[0]); i++) {
+            if (strcmp(msg->parameter, wifi_owned[i]) == 0) {
+                return ESP_OK;
+            }
+        }
+    }
+
     if (strcmp(msg->parameter, "hashrate") == 0) {
         ret = bap_handle_hashrate_response(msg->value);
     } else if (strcmp(msg->parameter, "chipTemp") == 0) {

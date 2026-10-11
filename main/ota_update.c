@@ -24,10 +24,10 @@ static const char *TAG = "OTA";
 #define OTA_STACK_SIZE 10240
 #define OTA_TASK_PRIORITY 1
 #define VERSION_CHECK_STACK_SIZE 8192
-#define GITHUB_API_URL "https://api.github.com/repos/bitaxeorg/BAP-GT-TOUCH/releases/latest"
-#define FIRMWARE_DOWNLOAD_URL "https://github.com/bitaxeorg/BAP-GT-TOUCH/releases/latest/download/esp-display-ota.bin"
+#define GITHUB_API_URL "https://api.github.com/repos/miner-mods/BAP-GT-TOUCH/releases/latest"
+#define FIRMWARE_DOWNLOAD_URL "https://github.com/miner-mods/BAP-GT-TOUCH/releases/latest/download/esp-display-ota.bin"
 
-static const char *ALLOWED_URL_PREFIX = "https://github.com/bitaxeorg/BAP-GT-TOUCH";
+static const char *ALLOWED_URL_PREFIX = "https://github.com/miner-mods/BAP-GT-TOUCH";
 
 static SemaphoreHandle_t ota_mutex = NULL;
 static ota_info_t ota_current_info = {0};

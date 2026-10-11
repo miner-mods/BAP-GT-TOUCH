@@ -10,13 +10,13 @@
 #include "loading.h"
 #include "home.h"
 #include "custom_fonts.h"
-#include "assets/logo_background.c"
+extern const lv_img_dsc_t mm_splash;
 #include "esp_log.h"
 #include "bap.h"
+#include "miners.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
-#include "display_control.h"
 
 /*********************
  *      DEFINES
@@ -49,32 +49,24 @@ static void bap_init_task(void *pvParameters);
 void loading(void)
 {
     screen = lv_scr_act();
-    lv_obj_set_style_bg_color(screen, COLOR_BACKGROUND, 0);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
 
-    // Create a title label
-    lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "Turbo Touch");
-    lv_obj_set_style_text_font(title, &angelwish_96, 0);
-    lv_obj_set_style_text_color(title, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
-
-    // Create logo image
+    // Miner-Mods boot logo
     logo_img = lv_img_create(screen);
-    lv_img_set_src(logo_img, &logo_background);
+    lv_img_set_src(logo_img, &mm_splash);
+    lv_obj_align(logo_img, LV_ALIGN_TOP_MID, 0, 0);
 
-    lv_img_set_zoom(logo_img, 200);
-    lv_obj_align(logo_img, LV_ALIGN_CENTER, 0, -30);
-
-    // Create loading text
+    // Loading text
     loading_label = lv_label_create(screen);
     lv_label_set_text(loading_label, "Loading...");
-    lv_obj_set_style_text_color(loading_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_align(loading_label, LV_ALIGN_CENTER, 0, 80);
+    lv_obj_set_style_text_color(loading_label, COLOR_TEXT_SECONDARY, 0);
+    lv_obj_align(loading_label, LV_ALIGN_BOTTOM_MID, 0, -8);
 
     // Create progress bar
     progress_bar = lv_bar_create(screen);
     lv_obj_set_size(progress_bar, 200, 20);
-    lv_obj_align(progress_bar, LV_ALIGN_BOTTOM_MID, 0, -50);
+    lv_obj_align(progress_bar, LV_ALIGN_BOTTOM_MID, 0, -40);
     lv_bar_set_range(progress_bar, 0, 100);
     lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(progress_bar, COLOR_CARD_BG, LV_PART_MAIN);
@@ -138,6 +130,9 @@ static void bap_init_task(void *pvParameters)
         ESP_LOGI(TAG, "BAP initialized successfully");
     }
 
+    // Miner-Mods: read both miners over WiFi
+    miners_start();
+
     // Remove from watchdog before deleting task
     if (wdt_ret == ESP_OK)
     {
@@ -154,7 +149,6 @@ static void finish_loading(void)
     lv_obj_clean(screen);
     home_screen_create();
     lv_scr_load(home_get_screen());
-    display_control_create_power_button();
 
     ESP_LOGI(TAG, "Creating BAP initialization task...");
     xTaskCreate(bap_init_task, "bap_init", 8192, NULL, 10, NULL);

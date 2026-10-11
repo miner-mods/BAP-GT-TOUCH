@@ -10,7 +10,6 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_touch.h"
-#include "display_control.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -431,7 +430,6 @@ static lv_disp_t *display_init(esp_lcd_panel_handle_t panel_handle)
 
 static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
 {
-    static bool suppress_until_release = false;
     esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)indev_drv->user_data; // Get touchpad handle from user data
     assert(tp); // Ensure touchpad handle is valid
 
@@ -445,16 +443,11 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
     /* Read data from touch controller */
     bool touchpad_pressed = esp_lcd_touch_get_coordinates(tp, &touchpad_x, &touchpad_y, NULL, &touchpad_cnt, 1); // Get touch coordinates
     if (touchpad_pressed && touchpad_cnt > 0) {
-        if (!display_control_is_backlight_on()) {
-            display_control_handle_touch_wake();
-            suppress_until_release = true;
-        }
         data->point.x = touchpad_x; // Set the X coordinate
         data->point.y = touchpad_y; // Set the Y coordinate
-        data->state = suppress_until_release ? LV_INDEV_STATE_RELEASED : LV_INDEV_STATE_PRESSED;
+        data->state = LV_INDEV_STATE_PRESSED; // Set state to pressed
         ESP_LOGD(TAG, "Touch position: %d,%d", touchpad_x, touchpad_y); // Log touch position
     } else {
-        suppress_until_release = false;
         data->state = LV_INDEV_STATE_RELEASED; // Set state to released
     }
 }

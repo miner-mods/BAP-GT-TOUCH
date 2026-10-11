@@ -26,6 +26,8 @@ static lv_obj_t *efficiency_label = NULL;
 static lv_obj_t *fan_label = NULL;
 static lv_obj_t *shares_label = NULL;
 static lv_obj_t *bd_label = NULL;
+static char current_miner_details[640] = "";
+extern const lv_img_dsc_t mm_background;
 
 static float current_power_watts = 0.0f;
 static float current_hashrate_ghs = 0.0f;
@@ -97,7 +99,7 @@ static void create_hardware_popup(void)
     lv_obj_add_event_cb(hardware_popup, hardware_popup_close_clicked, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *popup_cont = lv_obj_create(hardware_popup);
-    lv_obj_set_size(popup_cont, 500, 350);
+    lv_obj_set_size(popup_cont, 740, 440);
     lv_obj_center(popup_cont);
     lv_obj_set_style_bg_color(popup_cont, COLOR_CARD_BG, 0);
     lv_obj_set_style_bg_opa(popup_cont, LV_OPA_COVER, 0);
@@ -132,8 +134,8 @@ static void create_hardware_popup(void)
     lv_obj_add_event_cb(close_btn, hardware_popup_close_clicked, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *info_cont = lv_obj_create(popup_cont);
-    lv_obj_set_size(info_cont, 460, 250);
-    lv_obj_align(info_cont, LV_ALIGN_CENTER, 0, 15);
+    lv_obj_set_size(info_cont, 690, 340);
+    lv_obj_align(info_cont, LV_ALIGN_CENTER, 0, 20);
     lv_obj_set_style_bg_opa(info_cont, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(info_cont, 0, 0);
     lv_obj_set_style_pad_all(info_cont, 10, 0);
@@ -154,6 +156,17 @@ static void create_hardware_popup(void)
         lv_obj_set_style_text_font(info_label, &lv_font_montserrat_16, 0);
         lv_obj_set_pos(info_label, 0, y_offset);
         y_offset += 28;
+    }
+
+    if (current_miner_details[0])
+    {
+        lv_obj_t *details_label = lv_label_create(info_cont);
+        lv_label_set_text(details_label, current_miner_details);
+        lv_obj_set_width(details_label, 650);
+        lv_label_set_long_mode(details_label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(details_label, COLOR_TEXT_SECONDARY, 0);
+        lv_obj_set_style_text_font(details_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_pos(details_label, 0, y_offset + 8);
     }
 }
 
@@ -441,6 +454,12 @@ void home_screen_create(void)
     lv_obj_clear_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(main_cont, LV_SCROLLBAR_MODE_OFF);
 
+    // Miner-Mods logo watermark behind the stats
+    lv_obj_t *bg_logo = lv_img_create(main_cont);
+    lv_img_set_src(bg_logo, &mm_background);
+    lv_obj_align(bg_logo, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(bg_logo, LV_OBJ_FLAG_CLICKABLE);
+
     // lv_obj_t * title_label = lv_label_create(main_cont);
     // lv_label_set_text(title_label, "BITAXE STATS");
     // lv_obj_set_style_text_color(title_label, COLOR_ACCENT, 0);
@@ -488,7 +507,7 @@ void home_screen_create(void)
     lv_obj_align(hashrate_label, LV_ALIGN_CENTER, 0, -10);
 
     lv_obj_t *unit_label = lv_label_create(hashrate_cont);
-    lv_label_set_text(unit_label, "GH/s");
+    lv_label_set_text(unit_label, "TH/s");
     lv_obj_set_style_text_color(unit_label, COLOR_TEXT_PRIMARY, 0);
     lv_obj_set_style_text_font(unit_label, &lv_font_montserrat_20, 0);
     lv_obj_align(unit_label, LV_ALIGN_CENTER, -55, 34);
@@ -648,12 +667,17 @@ void home_update_hashrate(const char *hashrate)
 
     strncpy(current_hashrate_text, hashrate, sizeof(current_hashrate_text) - 1);
     current_hashrate_text[sizeof(current_hashrate_text) - 1] = '\0';
+    current_hashrate_ghs = atof(hashrate);
+
+    // Input is GH/s (from the miners); show TH/s on screen
+    char th_buffer[16];
+    snprintf(th_buffer, sizeof(th_buffer), "%.2f", current_hashrate_ghs / 1000.0f);
+    strncpy(current_hashrate_text, th_buffer, sizeof(current_hashrate_text) - 1);
+    current_hashrate_text[sizeof(current_hashrate_text) - 1] = '\0';
     if (hashrate_label)
     {
-        lv_label_set_text(hashrate_label, hashrate);
+        lv_label_set_text(hashrate_label, th_buffer);
     }
-
-    current_hashrate_ghs = atof(hashrate);
 
     update_efficiency_display();
 }
@@ -907,4 +931,15 @@ void home_update_best_difficulty(const char *bd)
     {
         lv_label_set_text(bd_label, bd_buffer);
     }
+}
+
+void home_update_miner_details(const char *details)
+{
+    if (!details)
+    {
+        return;
+    }
+    // Don't rebuild an open popup every few seconds; it picks up new text when reopened
+    strncpy(current_miner_details, details, sizeof(current_miner_details) - 1);
+    current_miner_details[sizeof(current_miner_details) - 1] = '\0';
 }

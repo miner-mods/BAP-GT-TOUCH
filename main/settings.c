@@ -10,9 +10,9 @@
 #include "string.h"
 #include "custom_fonts.h"
 #include "bap.h"
+#include "miners.h"
 #include "waveshare_rgb_lcd_port.h"
 #include "ota_update.h"
-#include "display_control.h"
 #include <stdlib.h>
 #include <time.h>
 #include "nvs_flash.h"
@@ -31,10 +31,6 @@ static lv_obj_t *fan_save_btn = NULL;
 static lv_obj_t *brightness_slider = NULL;
 static lv_obj_t *brightness_value_label = NULL;
 static lv_obj_t *timezone_dropdown = NULL;
-static lv_obj_t *display_schedule_checkbox = NULL;
-static lv_obj_t *display_off_dropdown = NULL;
-static lv_obj_t *display_on_dropdown = NULL;
-static lv_obj_t *display_corner_dropdown = NULL;
 static lv_obj_t *sys_overlay = NULL;
 static int diag_counter = 0;
 
@@ -52,7 +48,7 @@ static settings_info_t current_settings = {
     .brightness_percent = 100};
 
 static int current_timezone_index = 0;
-static bool settings_initialized = false;
+static bool timezone_applied = false;
 
 static const char *timezone_options =
     "UTC\n"
@@ -77,54 +73,8 @@ static const char *timezone_values[] = {
     "AEST-10AEDT,M10.1.0/2,M4.1.0/3",
 };
 
-static const char *display_time_options =
-    "12:00 AM\n12:30 AM\n1:00 AM\n1:30 AM\n2:00 AM\n2:30 AM\n"
-    "3:00 AM\n3:30 AM\n4:00 AM\n4:30 AM\n5:00 AM\n5:30 AM\n"
-    "6:00 AM\n6:30 AM\n7:00 AM\n7:30 AM\n8:00 AM\n8:30 AM\n"
-    "9:00 AM\n9:30 AM\n10:00 AM\n10:30 AM\n11:00 AM\n11:30 AM\n"
-    "12:00 PM\n12:30 PM\n1:00 PM\n1:30 PM\n2:00 PM\n2:30 PM\n"
-    "3:00 PM\n3:30 PM\n4:00 PM\n4:30 PM\n5:00 PM\n5:30 PM\n"
-    "6:00 PM\n6:30 PM\n7:00 PM\n7:30 PM\n8:00 PM\n8:30 PM\n"
-    "9:00 PM\n9:30 PM\n10:00 PM\n10:30 PM\n11:00 PM\n11:30 PM";
-
-static const char *display_corner_options =
-    "Visible Upper Right\n"
-    "Visible Upper Left\n"
-    "Hidden Upper Right\n"
-    "Hidden Upper Left";
-
 #define SETTINGS_NVS_NAMESPACE "settings"
 #define SETTINGS_NVS_TZ_INDEX_KEY "tz_index"
-
-static void settings_display_schedule_changed(lv_event_t *e);
-
-static void style_settings_dropdown(lv_obj_t *dropdown, const lv_font_t *font)
-{
-    lv_obj_set_style_bg_color(dropdown, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(dropdown, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(dropdown, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(dropdown, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(dropdown, LV_OPA_70, LV_PART_MAIN);
-    lv_obj_set_style_radius(dropdown, 8, LV_PART_MAIN);
-    lv_obj_set_style_text_color(dropdown, COLOR_TEXT_PRIMARY, LV_PART_MAIN);
-    lv_obj_set_style_text_font(dropdown, font, LV_PART_MAIN);
-    lv_obj_set_style_text_color(dropdown, COLOR_ACCENT, LV_PART_INDICATOR);
-
-    lv_obj_t *list = lv_dropdown_get_list(dropdown);
-    if (list) {
-        lv_obj_set_style_bg_color(list, COLOR_CARD_BG, LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_width(list, 1, LV_PART_MAIN);
-        lv_obj_set_style_border_color(list, COLOR_ACCENT, LV_PART_MAIN);
-        lv_obj_set_style_radius(list, 8, LV_PART_MAIN);
-        lv_obj_set_style_text_color(list, COLOR_TEXT_PRIMARY, LV_PART_MAIN);
-        lv_obj_set_style_text_font(list, font, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(list, COLOR_ACCENT, LV_PART_SELECTED);
-        lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SELECTED);
-        lv_obj_set_style_text_color(list, COLOR_TEXT_ON_ACCENT, LV_PART_SELECTED);
-        lv_obj_set_style_text_font(list, font, LV_PART_SELECTED);
-    }
-}
 
 static lv_obj_t *create_settings_button(lv_obj_t *parent, const char *text, lv_event_cb_t event_cb, bool active)
 {
@@ -264,6 +214,7 @@ static void apply_timezone_by_index(int index)
 
     setenv("TZ", timezone_values[index], 1);
     tzset();
+    timezone_applied = true;
 }
 
 static void settings_load_timezone(void)
@@ -328,21 +279,6 @@ static void settings_save_timezone(int index)
     nvs_set_i32(handle, SETTINGS_NVS_TZ_INDEX_KEY, index);
     nvs_commit(handle);
     nvs_close(handle);
-}
-
-void settings_initialize(void)
-{
-    if (settings_initialized) {
-        return;
-    }
-
-    settings_load_timezone();
-    size_t timezone_count = sizeof(timezone_values) / sizeof(timezone_values[0]);
-    if (current_timezone_index < 0 || (size_t)current_timezone_index >= timezone_count) {
-        current_timezone_index = 0;
-    }
-    apply_timezone_by_index(current_timezone_index);
-    settings_initialized = true;
 }
 
 static void update_fan_controls(void)
@@ -535,8 +471,7 @@ void settings_screen_create(void)
         return;
     }
 
-    settings_initialize();
-    display_control_set_power_button_visible(false);
+    settings_load_timezone();
 
     settings_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(settings_screen, COLOR_BACKGROUND, 0);
@@ -696,93 +631,25 @@ void settings_screen_create(void)
     lv_obj_align(timezone_dropdown, LV_ALIGN_TOP_LEFT, 140, -4);
     lv_dropdown_set_options(timezone_dropdown, timezone_options);
     lv_dropdown_set_selected(timezone_dropdown, current_timezone_index);
-    style_settings_dropdown(timezone_dropdown, &lv_font_montserrat_16);
+    lv_obj_set_style_bg_color(timezone_dropdown, COLOR_CARD_BG, 0);
+    lv_obj_set_style_bg_opa(timezone_dropdown, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(timezone_dropdown, 1, 0);
+    lv_obj_set_style_border_color(timezone_dropdown, COLOR_ACCENT, 0);
+    lv_obj_set_style_border_opa(timezone_dropdown, LV_OPA_50, 0);
+    lv_obj_set_style_radius(timezone_dropdown, 8, 0);
+    lv_obj_set_style_text_color(timezone_dropdown, COLOR_TEXT_PRIMARY, 0);
+    lv_obj_set_style_text_font(timezone_dropdown, &lv_font_montserrat_16, 0);
     lv_obj_add_event_cb(timezone_dropdown, settings_timezone_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
-    display_control_config_t display_config;
-    display_control_get_config(&display_config);
-
-    lv_obj_t *display_section = lv_obj_create(main_cont);
-    lv_obj_set_size(display_section, 680, 250);
-    lv_obj_align(display_section, LV_ALIGN_TOP_MID, 0, 480);
-    lv_obj_set_style_bg_opa(display_section, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(display_section, 0, 0);
-    lv_obj_set_style_pad_all(display_section, 10, 0);
-    lv_obj_clear_flag(display_section, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *display_title = lv_label_create(display_section);
-    lv_label_set_text(display_title, "Display Schedule:");
-    lv_obj_set_style_text_color(display_title, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(display_title, &lv_font_montserrat_18, 0);
-    lv_obj_align(display_title, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    display_schedule_checkbox = lv_checkbox_create(display_section);
-    lv_checkbox_set_text(display_schedule_checkbox, "Turn the display off daily");
-    lv_obj_set_style_text_color(display_schedule_checkbox, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(display_schedule_checkbox, &lv_font_montserrat_16, 0);
-    lv_obj_align(display_schedule_checkbox, LV_ALIGN_TOP_LEFT, 0, 32);
-    if (display_config.schedule_enabled) {
-        lv_obj_add_state(display_schedule_checkbox, LV_STATE_CHECKED);
+    if (!timezone_applied)
+    {
+        apply_timezone_by_index(current_timezone_index);
     }
-    lv_obj_add_event_cb(display_schedule_checkbox, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-    lv_obj_t *off_label = lv_label_create(display_section);
-    lv_label_set_text(off_label, "Turns off at");
-    lv_obj_set_style_text_color(off_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(off_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(off_label, LV_ALIGN_TOP_LEFT, 0, 70);
-
-    display_off_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_off_dropdown, 300, 36);
-    lv_obj_align(display_off_dropdown, LV_ALIGN_TOP_LEFT, 0, 94);
-    lv_dropdown_set_options(display_off_dropdown, display_time_options);
-    lv_dropdown_set_selected(display_off_dropdown, display_config.off_minute / 30U);
-    style_settings_dropdown(display_off_dropdown, &lv_font_montserrat_14);
-    lv_obj_add_event_cb(display_off_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-    lv_obj_t *on_label = lv_label_create(display_section);
-    lv_label_set_text(on_label, "Turns on at");
-    lv_obj_set_style_text_color(on_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(on_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(on_label, LV_ALIGN_TOP_LEFT, 340, 70);
-
-    display_on_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_on_dropdown, 300, 36);
-    lv_obj_align(display_on_dropdown, LV_ALIGN_TOP_LEFT, 340, 94);
-    lv_dropdown_set_options(display_on_dropdown, display_time_options);
-    lv_dropdown_set_selected(display_on_dropdown, display_config.on_minute / 30U);
-    style_settings_dropdown(display_on_dropdown, &lv_font_montserrat_14);
-    lv_obj_add_event_cb(display_on_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-    lv_obj_t *corner_label = lv_label_create(display_section);
-    lv_label_set_text(corner_label, "Display-off button");
-    lv_obj_set_style_text_color(corner_label, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(corner_label, &lv_font_montserrat_16, 0);
-    lv_obj_align(corner_label, LV_ALIGN_TOP_LEFT, 0, 142);
-
-    display_corner_dropdown = lv_dropdown_create(display_section);
-    lv_obj_set_size(display_corner_dropdown, 300, 36);
-    lv_obj_align(display_corner_dropdown, LV_ALIGN_TOP_LEFT, 0, 166);
-    lv_dropdown_set_options(display_corner_dropdown, display_corner_options);
-    lv_dropdown_set_selected(display_corner_dropdown,
-                             (uint16_t)display_button_mode_from_config(
-                                 display_config.power_button_corner,
-                                 display_config.power_button_visuals_visible));
-    style_settings_dropdown(display_corner_dropdown, &lv_font_montserrat_14);
-    lv_obj_add_event_cb(display_corner_dropdown, settings_display_schedule_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-    lv_obj_t *display_button_mode_hint = lv_label_create(display_section);
-    lv_label_set_text(display_button_mode_hint, "Hidden keeps the selected corner tappable");
-    lv_obj_set_style_text_color(display_button_mode_hint, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_text_font(display_button_mode_hint, &lv_font_montserrat_14, 0);
-    lv_obj_set_width(display_button_mode_hint, 650);
-    lv_label_set_long_mode(display_button_mode_hint, LV_LABEL_LONG_WRAP);
-    lv_obj_align(display_button_mode_hint, LV_ALIGN_TOP_LEFT, 0, 210);
 
     // OTA Update Section
     lv_obj_t *ota_section = lv_obj_create(main_cont);
     lv_obj_set_size(ota_section, 680, 160);
-    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 740);
+    lv_obj_align(ota_section, LV_ALIGN_TOP_MID, 0, 490);
     lv_obj_set_style_bg_opa(ota_section, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ota_section, 0, 0);
     lv_obj_set_style_pad_all(ota_section, 10, 0);
@@ -876,17 +743,11 @@ void settings_screen_destroy(void)
         brightness_slider = NULL;
         brightness_value_label = NULL;
         timezone_dropdown = NULL;
-        display_schedule_checkbox = NULL;
-        display_off_dropdown = NULL;
-        display_on_dropdown = NULL;
-        display_corner_dropdown = NULL;
         ota_update_btn = NULL;
         ota_status_label = NULL;
         ota_progress_bar = NULL;
         ota_version_label = NULL;
     }
-
-    display_control_set_power_button_visible(true);
 }
 
 lv_obj_t *settings_get_screen(void)
@@ -933,8 +794,8 @@ void settings_performance_low_clicked(lv_event_t *e)
     update_performance_buttons();
     printf("Performance mode set to LOW\n");
 
-    BAP_send_frequency_setting(575.0f);
-    BAP_send_asic_voltage(1160.0f);
+    // Miner-Mods: applied to both miners, using steps from their own option lists
+    miners_set_freq_voltage(490, 1100);
 }
 
 void settings_performance_medium_clicked(lv_event_t *e)
@@ -943,8 +804,7 @@ void settings_performance_medium_clicked(lv_event_t *e)
     update_performance_buttons();
     printf("Performance mode set to MEDIUM\n");
 
-    BAP_send_frequency_setting(600.0f);
-    BAP_send_asic_voltage(1200.0f);
+    miners_set_freq_voltage(525, 1150);  // stock
 }
 
 void settings_performance_high_clicked(lv_event_t *e)
@@ -953,8 +813,7 @@ void settings_performance_high_clicked(lv_event_t *e)
     update_performance_buttons();
     printf("Performance mode set to HIGH\n");
 
-    BAP_send_frequency_setting(655.0f);
-    BAP_send_asic_voltage(1200.0f);
+    miners_set_freq_voltage(600, 1200);
 }
 
 void settings_auto_fan_toggled(lv_event_t *e)
@@ -1064,31 +923,6 @@ void settings_timezone_changed(lv_event_t *e)
     current_timezone_index = (int)lv_dropdown_get_selected(dropdown);
     apply_timezone_by_index(current_timezone_index);
     settings_save_timezone(current_timezone_index);
-}
-
-static void settings_display_schedule_changed(lv_event_t *e)
-{
-    LV_UNUSED(e);
-    if (!display_schedule_checkbox || !display_off_dropdown || !display_on_dropdown ||
-        !display_corner_dropdown) {
-        return;
-    }
-
-    display_power_button_mode_t button_mode =
-        (display_power_button_mode_t)lv_dropdown_get_selected(display_corner_dropdown);
-
-    display_control_config_t config = {
-        .schedule_enabled = lv_obj_has_state(display_schedule_checkbox, LV_STATE_CHECKED),
-        .off_minute = (uint16_t)(lv_dropdown_get_selected(display_off_dropdown) * 30U),
-        .on_minute = (uint16_t)(lv_dropdown_get_selected(display_on_dropdown) * 30U),
-        .power_button_corner = display_button_mode_corner(button_mode),
-        .power_button_visuals_visible = display_button_mode_shows_visuals(button_mode),
-    };
-
-    esp_err_t err = display_control_set_config(&config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save display schedule: %s", esp_err_to_name(err));
-    }
 }
 
 void settings_night_clicked(lv_event_t *e)
