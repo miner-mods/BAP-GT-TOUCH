@@ -69,6 +69,7 @@ static wifi_info_t current_wifi_info = {
 };
 
 static void wifi_try_connect_from_bap(void);
+static void wifi_connect_current(void);
 static esp_err_t wifi_init_common(void);
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 static void wifi_refresh_status_ui(void);
@@ -999,8 +1000,6 @@ void wifi_autoconnect_saved(void)
     wifi_set_connection_state(WIFI_CONNECTION_STATE_CONNECTING);
     esp_wifi_connect();
 }
-
-static void wifi_connect_current(void);
 
 static void wifi_try_connect_from_bap(void)
 {
