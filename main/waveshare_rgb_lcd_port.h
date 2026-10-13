@@ -13,6 +13,7 @@
 #include "esp_lcd_touch_gt911.h"
 #include "lv_demos.h"
 #include "lvgl_port.h"
+#include "board_config.h"
 
 #define CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911 1 // 1 initiates the touch, 0 closes the touch.
 
@@ -36,7 +37,11 @@
 #define EXAMPLE_RGB_BIT_PER_PIXEL       (16)
 #define EXAMPLE_RGB_DATA_WIDTH          (16)
 #define EXAMPLE_RGB_BOUNCE_BUFFER_SIZE  (EXAMPLE_LCD_H_RES * CONFIG_EXAMPLE_LCD_RGB_BOUNCE_BUFFER_HEIGHT)
+#if MM_BOARD_WAVESHARE_43B
+#define EXAMPLE_LCD_IO_RGB_DISP         (-1)            // Waveshare: backlight via CH422G EXIO2 (GPIO12 is TF card SCK)
+#else
 #define EXAMPLE_LCD_IO_RGB_DISP         (GPIO_NUM_12)   // -1 if not used
+#endif
 #define EXAMPLE_LCD_IO_RGB_VSYNC        (GPIO_NUM_3)
 #define EXAMPLE_LCD_IO_RGB_HSYNC        (GPIO_NUM_46)
 #define EXAMPLE_LCD_IO_RGB_DE           (GPIO_NUM_5)
@@ -58,7 +63,11 @@
 #define EXAMPLE_LCD_IO_RGB_DATA14       (GPIO_NUM_41)
 #define EXAMPLE_LCD_IO_RGB_DATA15       (GPIO_NUM_40)
 
+#if MM_BOARD_WAVESHARE_43B
+#define EXAMPLE_LCD_IO_RST              (-1)             // Waveshare: GPIO13 is TF card MISO
+#else
 #define EXAMPLE_LCD_IO_RST              (GPIO_NUM_13)    // -1 if not used
+#endif
 #define EXAMPLE_PIN_NUM_BK_LIGHT        (-1)    // -1 if not used
 #define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL   (1)
 #define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL  !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL

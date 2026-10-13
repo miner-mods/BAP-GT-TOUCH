@@ -1,6 +1,7 @@
 #include "wifi.h"
 #include "home.h"
 #include "bap.h"
+#include "board_config.h"
 #include "settings.h"
 #include "night.h"
 #include "block.h"
@@ -55,6 +56,7 @@ typedef enum {
 
 static wifi_connection_state_t wifi_connection_state = WIFI_CONNECTION_STATE_DISCONNECTED;
 static int64_t wifi_connect_deadline_us = 0;
+static int64_t wifi_next_retry_us = 0;
 
 static wifi_info_t current_wifi_info = {
     .ssid = "MyNetwork",
@@ -314,6 +316,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         // Don't update IP address here - use BAP-provided IP instead
         // snprintf(current_wifi_info.ip_address, sizeof(current_wifi_info.ip_address), IPSTR, IP2STR(&event->ip_info.ip));
+#if MM_STANDALONE_WIFI
+        esp_ip4addr_ntoa(&event->ip_info.ip, current_wifi_info.ip_address, sizeof(current_wifi_info.ip_address));
+#endif
         LV_UNUSED(event);
         wifi_set_connection_state(WIFI_CONNECTION_STATE_CONNECTED);
         // Don't update IP label here - will be updated via BAP protocol
@@ -876,6 +881,26 @@ void wifi_task_handler(void)
 {
     wifi_check_scan_completion();
 
+#if MM_STANDALONE_WIFI
+    // Lost the network or a join timed out: retry the saved network every 30 s
+    if ((wifi_connection_state == WIFI_CONNECTION_STATE_DISCONNECTED ||
+         wifi_connection_state == WIFI_CONNECTION_STATE_FAILED) &&
+        wifi_initialized && current_wifi_info.ssid[0] != '\0' && !scan_in_progress) {
+        int64_t now = esp_timer_get_time();
+        if (wifi_next_retry_us == 0) {
+            wifi_next_retry_us = now + 30LL * 1000 * 1000;
+        } else if (now >= wifi_next_retry_us) {
+            wifi_next_retry_us = 0;
+            ESP_LOGI(TAG, "Retrying WiFi %s", current_wifi_info.ssid);
+            wifi_connect_pending = true;
+            wifi_set_connection_state(WIFI_CONNECTION_STATE_CONNECTING);
+            esp_wifi_connect();
+        }
+    } else {
+        wifi_next_retry_us = 0;
+    }
+#endif
+
     if (wifi_connection_state == WIFI_CONNECTION_STATE_CONNECTING &&
         wifi_connect_deadline_us > 0 &&
         esp_timer_get_time() >= wifi_connect_deadline_us) {
@@ -935,17 +960,60 @@ void wifi_connect_clicked(lv_event_t * e)
             lv_label_set_text(ssid_label, current_wifi_info.ssid);
         }
 
+#if MM_STANDALONE_WIFI
+        // No BAP cable: the screen joins this network itself
+        strncpy(current_wifi_info.password, password ? password : "", sizeof(current_wifi_info.password) - 1);
+        current_wifi_info.password[sizeof(current_wifi_info.password) - 1] = '\0';
+        wifi_connect_current();
+#else
         BAP_send_ssid(selected_ssid);
         BAP_send_password(password);
+#endif
     }
 }
+
+bool wifi_has_saved_credentials(void)
+{
+    if (wifi_init_common() != ESP_OK) {
+        return false;
+    }
+    wifi_config_t cfg = {0};
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) != ESP_OK) {
+        return false;
+    }
+    return cfg.sta.ssid[0] != '\0';
+}
+
+void wifi_autoconnect_saved(void)
+{
+    if (!wifi_has_saved_credentials()) {
+        ESP_LOGI(TAG, "No saved WiFi network yet");
+        return;
+    }
+    wifi_config_t cfg = {0};
+    esp_wifi_get_config(WIFI_IF_STA, &cfg);
+    strncpy(current_wifi_info.ssid, (const char *)cfg.sta.ssid, sizeof(current_wifi_info.ssid) - 1);
+    current_wifi_info.ssid[sizeof(current_wifi_info.ssid) - 1] = '\0';
+    ESP_LOGI(TAG, "Connecting to saved network %s", current_wifi_info.ssid);
+    wifi_connect_pending = true;
+    wifi_set_connection_state(WIFI_CONNECTION_STATE_CONNECTING);
+    esp_wifi_connect();
+}
+
+static void wifi_connect_current(void);
 
 static void wifi_try_connect_from_bap(void)
 {
     if (!wifi_bap_ssid_received || !wifi_bap_password_received) {
         return;
     }
+    wifi_connect_current();
+}
 
+// Join the network in current_wifi_info (ssid/password). esp_wifi saves it in
+// flash, so it is reused automatically on the next boot.
+static void wifi_connect_current(void)
+{
     if (current_wifi_info.ssid[0] == '\0') {
         return;
     }

@@ -50,6 +50,51 @@ void gpio_init(void)
     gpio_config(&io_conf);
 }
 
+#if MM_BOARD_WAVESHARE_43B
+/*
+ * Waveshare 4.3B: a CH422G I/O expander on the touch I2C bus drives
+ *   EXIO1 = touch reset, EXIO2 = backlight enable, EXIO4 = TF card CS (active low).
+ * EXIO0/EXIO5 are the isolated digital inputs, so they are left low.
+ */
+#define CH422G_ADDR_SET   0x24   // system parameter register
+#define CH422G_ADDR_IO    0x38   // EXIO output register
+#define EXIO_TP_RST       0x02
+#define EXIO_BACKLIGHT    0x04
+#define EXIO_LCD_RST      0x08
+#define EXIO_SD_CS        0x10
+
+static uint8_t s_exio_state = EXIO_TP_RST | EXIO_BACKLIGHT | EXIO_LCD_RST | EXIO_SD_CS;
+
+static esp_err_t ch422g_write(uint8_t value)
+{
+    uint8_t mode = 0x01; // IO pins as outputs
+    esp_err_t ret = i2c_master_write_to_device(I2C_MASTER_NUM, CH422G_ADDR_SET, &mode, 1,
+                                               I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+    if (ret == ESP_OK) {
+        ret = i2c_master_write_to_device(I2C_MASTER_NUM, CH422G_ADDR_IO, &value, 1,
+                                         I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G write 0x%02X failed: %s", value, esp_err_to_name(ret));
+    } else {
+        s_exio_state = value;
+    }
+    return ret;
+}
+
+static esp_err_t ws_backlight(bool on)
+{
+    uint8_t v = on ? (s_exio_state | EXIO_BACKLIGHT) : (s_exio_state & (uint8_t)~EXIO_BACKLIGHT);
+    return ch422g_write(v);
+}
+
+void set_ext_to_io(uint8_t value)
+{
+    // Callers pass touch-reset low/high states; keep the other lines as they are
+    uint8_t v = (s_exio_state & (uint8_t)~EXIO_TP_RST) | (value & EXIO_TP_RST);
+    ch422g_write(v);
+}
+#else
 // This translates the GPIO expander output byte into the ESP32 IO signals that need to be set
 void set_ext_to_io(uint8_t value)
 {
@@ -64,6 +109,7 @@ void set_ext_to_io(uint8_t value)
     gpio_set_level(EXAMPLE_LCD_IO_RST, io_13_val);
 
 }
+#endif
 
 
 // Reset the touch screen
@@ -240,7 +286,13 @@ esp_err_t waveshare_esp32_s3_rgb_lcd_init()
     ESP_LOGI(TAG, "PWM Frequency: %d Hz (datasheet optimal: 5kHz-100kHz)", LCD_BACKLIGHT_LEDC_FREQUENCY);
     ESP_LOGI(TAG, "Default Brightness: %d%%", LCD_BACKLIGHT_DEFAULT_BRIGHTNESS);
     
+#if MM_BOARD_WAVESHARE_43B
+    // Backlight is on/off only, through the CH422G expander (GPIO15 is CAN TX on this board)
+    backlight_initialized = true;
+    esp_err_t pwm_ret = ESP_OK;
+#else
     esp_err_t pwm_ret = lcd_backlight_pwm_init();
+#endif
     if (pwm_ret != ESP_OK) {
         ESP_LOGE(TAG, "=== PWM BRIGHTNESS CONTROL FAILED ===");
         ESP_LOGE(TAG, "Error: %s (0x%x)", esp_err_to_name(pwm_ret), pwm_ret);
@@ -267,6 +319,9 @@ esp_err_t wavesahre_rgb_lcd_bl_on()
     //write_buf = 0x1E;
     //i2c_master_write_to_device(I2C_MASTER_NUM, 0x38, &write_buf, 1, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     
+#if MM_BOARD_WAVESHARE_43B
+    return ws_backlight(true);
+#endif
     // Enable TPS61161 brightness control via GPIO15 PWM (GPIO12 disconnected)
     if (backlight_initialized) {
         ESP_LOGI(TAG, "Enabling TPS61161 brightness control via GPIO15 PWM");
@@ -289,6 +344,9 @@ esp_err_t wavesahre_rgb_lcd_bl_off()
     //write_buf = 0x1A;
     //i2c_master_write_to_device(I2C_MASTER_NUM, 0x38, &write_buf, 1, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
     
+#if MM_BOARD_WAVESHARE_43B
+    return ws_backlight(false);
+#endif
     // Turn off TPS61161 brightness control via GPIO15 PWM
     if (backlight_initialized) {
         ESP_LOGI(TAG, "Disabling TPS61161 brightness control via GPIO15 PWM");
@@ -310,6 +368,10 @@ esp_err_t wavesahre_rgb_lcd_bl_off()
  */
 esp_err_t lcd_backlight_pwm_init(void)
 {
+#if MM_BOARD_WAVESHARE_43B
+    backlight_initialized = true;
+    return ESP_OK;
+#endif
     esp_err_t ret = ESP_OK;
 
     ESP_LOGI(TAG, "Initializing GPIO12 PWM for TPS61161 backlight driver");
@@ -371,6 +433,11 @@ esp_err_t lcd_backlight_pwm_init(void)
  */
 esp_err_t lcd_backlight_set_brightness(uint8_t brightness_percent)
 {
+#if MM_BOARD_WAVESHARE_43B
+    if (brightness_percent > 100) brightness_percent = 100;
+    current_brightness = brightness_percent;
+    return ws_backlight(brightness_percent > 0);
+#endif
     if (!backlight_initialized) {
         ESP_LOGE(TAG, "PWM backlight not initialized");
         return ESP_ERR_INVALID_STATE;
@@ -431,6 +498,10 @@ uint8_t lcd_backlight_get_brightness(void)
  */
 esp_err_t lcd_backlight_fade_to(uint8_t target_brightness, uint32_t fade_time_ms)
 {
+#if MM_BOARD_WAVESHARE_43B
+    (void)fade_time_ms;
+    return lcd_backlight_set_brightness(target_brightness);
+#endif
     if (!backlight_initialized) {
         ESP_LOGE(TAG, "PWM backlight not initialized");
         return ESP_ERR_INVALID_STATE;
@@ -470,6 +541,9 @@ esp_err_t lcd_backlight_fade_to(uint8_t target_brightness, uint32_t fade_time_ms
  */
 esp_err_t lcd_backlight_enable(void)
 {
+#if MM_BOARD_WAVESHARE_43B
+    return ws_backlight(current_brightness > 0);
+#endif
     if (!backlight_initialized) {
         ESP_LOGE(TAG, "PWM backlight not initialized");
         return ESP_ERR_INVALID_STATE;
@@ -484,6 +558,9 @@ esp_err_t lcd_backlight_enable(void)
  */
 esp_err_t lcd_backlight_disable(void)
 {
+#if MM_BOARD_WAVESHARE_43B
+    return ws_backlight(false);
+#endif
     if (!backlight_initialized) {
         ESP_LOGE(TAG, "PWM backlight not initialized");
         return ESP_ERR_INVALID_STATE;

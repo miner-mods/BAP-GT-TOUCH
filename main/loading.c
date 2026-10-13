@@ -14,6 +14,9 @@ extern const lv_img_dsc_t mm_splash;
 #include "esp_log.h"
 #include "bap.h"
 #include "miners.h"
+#include "board_config.h"
+#include "wifi.h"
+#include "lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
@@ -118,6 +121,13 @@ static void bap_init_task(void *pvParameters)
         esp_task_wdt_reset();
     }
 
+#if MM_STANDALONE_WIFI
+    // No BAP cable: join the saved WiFi network (if one has been set up)
+    if (lvgl_port_lock(-1)) {
+        wifi_autoconnect_saved();
+        lvgl_port_unlock();
+    }
+#else
     ESP_LOGI(TAG, "Initializing BAP...");
 
     esp_err_t ret = BAP_init();
@@ -129,6 +139,8 @@ static void bap_init_task(void *pvParameters)
     {
         ESP_LOGI(TAG, "BAP initialized successfully");
     }
+
+#endif
 
     // Miner-Mods: read both miners over WiFi
     miners_start();
@@ -147,8 +159,17 @@ static void finish_loading(void)
     lv_timer_del(loading_timer);
 
     lv_obj_clean(screen);
-    home_screen_create();
-    lv_scr_load(home_get_screen());
+#if MM_STANDALONE_WIFI
+    if (!wifi_has_saved_credentials()) {
+        // First boot: go straight to WiFi setup
+        wifi_screen_create();
+        lv_scr_load(wifi_get_screen());
+    } else
+#endif
+    {
+        home_screen_create();
+        lv_scr_load(home_get_screen());
+    }
 
     ESP_LOGI(TAG, "Creating BAP initialization task...");
     xTaskCreate(bap_init_task, "bap_init", 8192, NULL, 10, NULL);
